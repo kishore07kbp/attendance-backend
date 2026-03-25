@@ -1,0 +1,514 @@
+const express = require('express');
+const Student = require('../models/Student');
+const User = require('../models/User');
+const Attendance = require('../models/Attendance');
+const Course = require('../models/Course');
+const Faculty = require('../models/Faculty');
+const { protect } = require('../middleware/auth');
+const faceRecognition = require('../utils/faceRecognition');
+
+const router = express.Router();
+
+// Helper to calculate daily points
+const getDailyPoints = async (student, date, attendanceCount) => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayName = days[new Date(date).getDay()];
+
+  // Get scheduled courses for this student's year/class on this day
+  const scheduledCount = await Course.countDocuments({
+    year: student.year,
+    studentClass: student.studentClass,
+    day: dayName
+  });
+
+  if (attendanceCount === 0) return 0;
+
+  // If no courses are scheduled in the system for this day, we default to 1.0 points if any attendance was marked
+  // (This handles cases where the timetable might be incomplete)
+  if (scheduledCount === 0) return 1.0;
+
+  // 1.0 if all classes attended, 0.5 if at least one but not all
+  if (attendanceCount >= scheduledCount) return 1.0;
+  return 0.5;
+};
+
+/////////////////////////////////////////////////////////
+// GET STUDENT PROFILE
+/////////////////////////////////////////////////////////
+
+router.get('/profile', protect, async (req, res) => {
+
+  try {
+
+    const student = await Student.findOne({ userId: req.user._id })
+      .populate('userId', 'name email');
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student profile not found"
+      });
+    }
+
+    // Find class advisor for this student
+    const advisor = await Faculty.findOne({
+      classAdvisorClass: student.studentClass,
+      classAdvisorYear: student.year
+    });
+
+    res.json({
+      success: true,
+      student: {
+        ...student.toObject(),
+        classAdvisorName: advisor ? advisor.name : 'Not Assigned'
+      }
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+/////////////////////////////////////////////////////////
+// UPDATE STUDENT PROFILE
+/////////////////////////////////////////////////////////
+
+router.put('/profile', protect, async (req, res) => {
+
+  try {
+
+    const { name, email, rollNumber } = req.body;
+
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found"
+      });
+    }
+
+    if (name) user.name = name;
+    if (email) user.email = email;
+
+    await user.save();
+
+    const student = await Student.findOne({ userId: req.user._id });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student profile not found"
+      });
+    }
+
+    if (rollNumber) {
+      student.rollNumber = rollNumber.toUpperCase();
+    }
+
+    await student.save();
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully"
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+/////////////////////////////////////////////////////////
+// REGISTER FACE
+/////////////////////////////////////////////////////////
+
+router.post('/register-face', protect, async (req, res) => {
+
+  try {
+
+    const { faceDescriptor } = req.body;
+
+    if (!faceDescriptor) {
+      return res.status(400).json({
+        message: "Face descriptor required"
+      });
+    }
+
+    const student = await Student.findOne({ userId: req.user._id });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found"
+      });
+    }
+
+    if (student.faceDescriptor && student.faceDescriptor.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Face already registered. Overwrite not allowed."
+      });
+    }
+
+    // Check if this face is already registered with another student
+    const allStudentsWithFaces = await Student.find({
+      faceDescriptor: { $exists: true, $ne: null, $not: { $size: 0 } },
+      _id: { $ne: student._id }
+    }).select('faceDescriptor');
+
+    for (const otherStudent of allStudentsWithFaces) {
+      const match = faceRecognition.compareFaces(
+        faceDescriptor,
+        otherStudent.faceDescriptor,
+        0.85 // Standard strict threshold for matching
+      );
+
+      if (match.isMatch) {
+        return res.status(400).json({
+          success: false,
+          message: "The face is already matched with another account"
+        });
+      }
+    }
+
+    student.faceDescriptor = faceDescriptor;
+
+    await student.save();
+
+    res.json({
+      success: true,
+      message: "Face registered successfully"
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+/////////////////////////////////////////////////////////
+// REGISTER PERMANENT ID (FROM ESP32 SCAN)
+/////////////////////////////////////////////////////////
+
+router.post('/register-permanent-id', protect, async (req, res) => {
+
+  try {
+
+    const { permanentId, deviceName } = req.body;
+
+    if (!permanentId) {
+      return res.status(400).json({
+        message: "Permanent ID required"
+      });
+    }
+
+    // Check if this Permanent ID is already registered to another student
+    const existingStudent = await Student.findOne({
+      permanentId: permanentId,
+      userId: { $ne: req.user._id }
+    });
+
+    if (existingStudent) {
+      return res.status(400).json({
+        message: "This device is already registered to another student"
+      });
+    }
+
+    const student = await Student.findOne({ userId: req.user._id });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found"
+      });
+    }
+
+    // Link the device
+    student.permanentId = permanentId;
+
+    await student.save();
+
+    res.json({
+      success: true,
+      message: "Permanent ID registered successfully"
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+/////////////////////////////////////////////////////////
+// MARK ATTENDANCE
+/////////////////////////////////////////////////////////
+
+router.post('/mark-attendance', protect, async (req, res) => {
+
+  try {
+
+    const { faceDescriptor, course, bleDeviceId } = req.body;
+
+    const student = await Student.findOne({ userId: req.user._id });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found"
+      });
+    }
+
+    /////////////////////////////////////////////////////////
+    // FACE VERIFICATION
+    /////////////////////////////////////////////////////////
+
+    let faceVerified = false;
+
+    if (student.faceDescriptor && student.faceDescriptor.length > 0) {
+      const match = faceRecognition.compareFaces(
+        faceDescriptor,
+        student.faceDescriptor,
+        0.85 // Balanced but strict threshold
+      );
+
+      console.log("Face matching result:", match);
+      faceVerified = match.isMatch;
+    }
+
+    /////////////////////////////////////////////////////////
+    // BLE VERIFICATION
+    /////////////////////////////////////////////////////////
+
+    const bleVerified = (student.permanentId === bleDeviceId);
+
+    if (!faceVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Face does not match the registered student. Attendance not allowed."
+      });
+    }
+
+    /////////////////////////////////////////////////////////
+    // CHECK IF ALREADY MARKED
+    /////////////////////////////////////////////////////////
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const existingAttendance = await Attendance.findOne({
+      studentId: student._id,
+      date: { $gte: today },
+      course: course
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        message: "Attendance already marked today"
+      });
+    }
+
+    /////////////////////////////////////////////////////////
+    // MARK ATTENDANCE
+    /////////////////////////////////////////////////////////
+
+    const now = new Date();
+
+    const attendance = await Attendance.create({
+
+      studentId: student._id,
+      userId: req.user._id,
+
+      date: now,
+      time: now.toLocaleTimeString(),
+
+      status: bleVerified ? "present" : "absent",
+
+      faceVerified,
+      bleVerified,
+
+      course: course || "Unknown",
+      rollNumber: student.rollNumber,
+      studentClass: student.studentClass,
+      year: student.year
+
+    });
+
+    res.json({
+      success: true,
+      attendance
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+/////////////////////////////////////////////////////////
+// GET ATTENDANCE STATS
+/////////////////////////////////////////////////////////
+
+router.get('/attendance-stats', protect, async (req, res) => {
+
+  try {
+
+    const student = await Student.findOne({ userId: req.user._id });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found"
+      });
+    }
+
+    // Historical Stats
+    const allAttendance = await Attendance.find({
+      studentId: student._id,
+      status: 'present'
+    });
+
+    // Group by date to calculate points
+    const groupedByDate = {};
+    allAttendance.forEach(att => {
+      if (!att.date) return;
+      try {
+        const dateKey = new Date(att.date).toISOString().split('T')[0];
+        groupedByDate[dateKey] = (groupedByDate[dateKey] || 0) + 1;
+      } catch (e) {
+        console.warn("Invalid date in attendance record for stats:", att.date);
+      }
+    });
+
+    let totalPoints = 0;
+    const dates = Object.keys(groupedByDate);
+
+    for (const date of dates) {
+      try {
+        const points = await getDailyPoints(student, date, groupedByDate[date]);
+        totalPoints += points;
+      } catch (e) {
+        console.error("Error calculating points for stats on", date, e);
+      }
+    }
+
+    // Today's Stats
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()];
+
+    const [todayAttendance, scheduledToday] = await Promise.all([
+      Attendance.find({
+        studentId: student._id,
+        date: { $gte: today },
+        status: 'present'
+      }),
+      Course.countDocuments({
+        year: student.year,
+        studentClass: student.studentClass,
+        day: dayName
+      })
+    ]);
+
+    const historicalTotalDays = dates.length;
+    const attendancePercentage = historicalTotalDays > 0 ? ((totalPoints / historicalTotalDays) * 100).toFixed(2) : 0;
+
+    res.json({
+      success: true,
+      stats: {
+        totalDays: historicalTotalDays,
+        todayClasses: todayAttendance.length,
+        scheduledToday: scheduledToday || 0,
+        presentDays: totalPoints,
+        absentDays: historicalTotalDays - totalPoints,
+        attendancePercentage
+      }
+    });
+
+  } catch (error) {
+    console.error("Stats Error:", error);
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+/////////////////////////////////////////////////////////
+// ATTENDANCE HISTORY
+/////////////////////////////////////////////////////////
+
+router.get('/attendance-history', protect, async (req, res) => {
+
+  try {
+
+    const student = await Student.findOne({ userId: req.user._id });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found"
+      });
+    }
+
+    const attendance = await Attendance.find({
+      studentId: student._id
+    }).sort({ date: -1 });
+
+    // Group by date for daily summaries (used by chart)
+    const grouped = {};
+    attendance.forEach(att => {
+      if (!att.date) return;
+      try {
+        const dateKey = new Date(att.date).toISOString().split('T')[0];
+        if (!grouped[dateKey]) grouped[dateKey] = { count: 0, date: dateKey };
+        if (att.status === 'present') grouped[dateKey].count++;
+      } catch (e) {
+        console.warn("Invalid date in attendance record:", att.date);
+      }
+    });
+
+    const dailySummary = [];
+    for (const dateKey in grouped) {
+      try {
+        const points = await getDailyPoints(student, dateKey, grouped[dateKey].count);
+        dailySummary.push({
+          date: dateKey,
+          points: points
+        });
+      } catch (e) {
+        console.error("Error calculating daily points for", dateKey, e);
+      }
+    }
+
+    res.json({
+      success: true,
+      attendance,
+      dailySummary: dailySummary.sort((a, b) => new Date(a.date) - new Date(b.date))
+    });
+
+  } catch (error) {
+    console.error("History Error:", error);
+    res.status(500).json({
+      message: error.message
+    });
+
+  }
+
+});
+
+module.exports = router;
