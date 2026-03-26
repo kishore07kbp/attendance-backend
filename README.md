@@ -101,6 +101,15 @@ Authorization: Bearer <token>
 
 ---
 
+## ⚙️ Configuration (Environment Variables)
+Create a `.env` file in the `backend` directory with the following:
+- `MONGODB_URI`: Your MongoDB connection string.
+- `JWT_SECRET`: Secret key for token signing.
+- `BREVO_API_KEY`: API Key from Brevo (Sendinblue).
+- `EMAIL_FROM`: Your verified sender email address in Brevo.
+
+---
+
 ## ❌ Error Handling
 Errors follow the standard JSON structure:
 ```json
