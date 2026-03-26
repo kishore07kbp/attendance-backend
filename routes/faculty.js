@@ -233,11 +233,15 @@ router.get('/attendance/daily', async (req, res) => {
     const nextDay = new Date(targetDate);
     nextDay.setDate(nextDay.getDate() + 1);
 
-    const { year, studentClass } = req.query;
+    const { year, studentClass, course } = req.query;
 
     let query = {
       date: { $gte: targetDate, $lt: nextDay }
     };
+
+    if (course && course !== 'All') {
+      query.course = course;
+    }
 
     // Determine student filter based on faculty department
     const faculty = await Faculty.findOne({ userId: req.user._id });

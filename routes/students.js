@@ -107,6 +107,12 @@ router.put('/profile', protect, async (req, res) => {
     if (rollNumber) {
       student.rollNumber = rollNumber.toUpperCase();
     }
+    if (name) {
+      student.name = name;
+    }
+    if (email) {
+      student.email = email;
+    }
 
     await student.save();
 
@@ -160,19 +166,20 @@ router.post('/register-face', protect, async (req, res) => {
     const allStudentsWithFaces = await Student.find({
       faceDescriptor: { $exists: true, $ne: null, $not: { $size: 0 } },
       _id: { $ne: student._id }
-    }).select('faceDescriptor');
+    }).select('faceDescriptor rollNumber');
 
     for (const otherStudent of allStudentsWithFaces) {
-      const match = faceRecognition.compareFaces(
-        faceDescriptor,
-        otherStudent.faceDescriptor,
-        0.85 // Standard strict threshold for matching
-      );
+      const distance = faceRecognition.calculateDistance(faceDescriptor, otherStudent.faceDescriptor);
 
-      if (match.isMatch) {
+      // Log for server-side debugging
+      console.log(`Matching: Current request against ${otherStudent.rollNumber} | Euclidean Distance: ${distance.toFixed(4)}`);
+
+      // Euclidean distance standard threshold is 0.6 (where < 0.6 is a match)
+      // We'll use 0.45 for very high strictness during registration
+      if (distance < 0.45) {
         return res.status(400).json({
           success: false,
-          message: "The face is already matched with another account"
+          message: `The face is already matched with another account (Roll: ${otherStudent.rollNumber}) | Matching Distance: ${distance.toFixed(4)}`
         });
       }
     }

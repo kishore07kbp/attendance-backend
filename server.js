@@ -61,13 +61,7 @@ app.use("/api/ble", require("./routes/bleStream"));
 app.use('/api/mobile', require('./routes/mobile'));
 
 // Socket.io for real-time updates
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
-});
 
 // Make io accessible to routes
 app.set('io', io);

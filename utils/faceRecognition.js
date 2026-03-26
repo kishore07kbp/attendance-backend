@@ -53,7 +53,8 @@ function calculateDistance(descriptor1, descriptor2) {
 function compareFaces(descriptor1, descriptor2, threshold = 0.6) {
   const similarity = calculateCosineSimilarity(descriptor1, descriptor2);
   const distance = calculateDistance(descriptor1, descriptor2);
-  const isMatch = similarity > threshold;
+  // Match based on Euclidean distance (standard for face-api.js)
+  const isMatch = distance < threshold;
 
   return {
     similarity,
