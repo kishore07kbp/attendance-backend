@@ -66,6 +66,52 @@ app.use('/api/courses', require('./routes/courses'));
 app.use("/api/ble", require("./routes/bleStream"));
 app.use('/api/mobile', require('./routes/mobile'));
 
+/*
+---------------------------------------
+ESP32 HTTP Route (NEW)
+---------------------------------------
+*/
+app.post("/api/esp32-scan", async (req, res) => {
+  try {
+    console.log("📡 ESP32 Data Received:", req.body);
+
+    // 🔥 Extract data
+    const { roll, permId, rssi } = req.body;
+
+    // 🔥 OPTIONAL: Validate data
+    if (!roll || !permId) {
+      return res.status(400).json({ message: "Invalid data" });
+    }
+
+    /*
+    ---------------------------------------
+    CALL YOUR EXISTING LOGIC
+    ---------------------------------------
+    */
+    const axios = require("axios");
+
+    await axios.post("https://attendance-backend-i6mj.onrender.com/api/devices/scan", {
+      roll,
+      permId,
+      rssi
+    });
+
+    console.log(`✅ Attendance Marked → ${roll}`);
+
+    res.status(200).json({
+      success: true,
+      message: "Data received successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ ESP32 Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
+
 // ✅ Make socket available in routes
 app.set('io', io);
 
