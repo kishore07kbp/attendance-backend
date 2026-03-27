@@ -9,12 +9,13 @@ const faceRecognition = require('../utils/faceRecognition');
 
 const router = express.Router();
 
-// Helper to calculate daily points
+// Helper to calculate daily points in IST
 const getDailyPoints = async (student, date, attendanceCount) => {
-  // 1. Convert date to IST to find dayName
-  const istDate = new Date(new Date(date).toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  // 1. Convert any incoming date to IST timestamp
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(new Date(date).getTime() + istOffset);
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const dayName = days[istDate.getDay()];
+  const dayName = days[istDate.getUTCDay()];
 
   // Get scheduled courses for this student's year/class on this day
   const scheduledCount = await Course.countDocuments({
@@ -310,15 +311,17 @@ router.post('/mark-attendance', protect, async (req, res) => {
     }
 
     /////////////////////////////////////////////////////////
-    // CHECK IF ALREADY MARKED
+    // CHECK IF ALREADY MARKED (IST-AWARE)
     /////////////////////////////////////////////////////////
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(new Date().getTime() + istOffset);
+    istNow.setUTCHours(0, 0, 0, 0); // Start of day in IST
+    const istStartOfTodayAsUtc = new Date(istNow.getTime() - istOffset);
 
     const existingAttendance = await Attendance.findOne({
       studentId: student._id,
-      date: { $gte: today },
+      date: { $gte: istStartOfTodayAsUtc },
       course: course
     });
 
@@ -416,17 +419,18 @@ router.get('/attendance-stats', protect, async (req, res) => {
     }
 
     // Today's Stats in IST
+    const istOffset = 5.5 * 60 * 60 * 1000;
     const now = new Date();
-    const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    const istStartOfToday = new Date(istNow);
-    istStartOfToday.setHours(0, 0, 0, 0);
-
-    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][istNow.getDay()];
+    const istNow = new Date(now.getTime() + istOffset);
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][istNow.getUTCDay()];
+    
+    istNow.setUTCHours(0, 0, 0, 0); // Midnight IST
+    const istStartOfTodayAsUtc = new Date(istNow.getTime() - istOffset);
 
     const [todayAttendance, scheduledToday] = await Promise.all([
       Attendance.find({
         studentId: student._id,
-        date: { $gte: istStartOfToday },
+        date: { $gte: istStartOfTodayAsUtc },
         status: 'present'
       }),
       Course.countDocuments({

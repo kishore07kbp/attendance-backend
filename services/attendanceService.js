@@ -2,67 +2,52 @@ const Student = require("../models/Student");
 const Attendance = require("../models/Attendance");
 const Course = require("../models/Course");
 
+// 🔥 In-memory lock to prevent race conditions from high-frequency MQTT scans
+const processingScans = new Set(); 
+
 /**
  * Shared service for marking attendance from scans (MQTT/HTTP).
  * Centralizes duplicate checks and course identification.
+ * Uses consistent IST (Asia/Kolkata) timezone.
  */
 module.exports = async function markAttendance(data) {
+  const { roll, permId, rssi } = data;
+  if (!roll) return;
+
+  const rollUpper = roll.toUpperCase();
+  const now = new Date();
+
+  // 1. Identify current time/day in IST (Asia/Kolkata)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+    weekday: 'long'
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const timeParts = {};
+  parts.forEach(p => timeParts[p.type] = p.value);
+  
+  const currentDay = timeParts.weekday;
+  const currentTimeMinutes = parseInt(timeParts.hour) * 60 + parseInt(timeParts.minute);
+
   try {
-    const { roll, permId, rssi } = data;
-
-    if (!roll) {
-      console.log("⚠️ Received incomplete MQTT data (missing roll):", data);
-      return;
-    }
-
-    // 1. Find the student
-    const student = await Student.findOne({ 
-      rollNumber: roll.toUpperCase()
-    });
-
+    // 2. Find the student
+    const student = await Student.findOne({ rollNumber: rollUpper });
     if (!student) {
-      console.log(`❌ Student not found for Roll: ${roll}`);
+      console.log(`❌ Student not found for Roll: ${rollUpper}`);
       return;
     }
 
-    // 2. Identify current time/day in IST (Asia/Kolkata)
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Kolkata',
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: false,
-      weekday: 'long'
-    });
-    
-    const parts = formatter.formatToParts(now);
-    const timeParts = {};
-    parts.forEach(p => timeParts[p.type] = p.value);
-    
-    const currentDay = timeParts.weekday;
-    const currentHour = parseInt(timeParts.hour);
-    const currentMinute = parseInt(timeParts.minute);
-    const currentTimeMinutes = currentHour * 60 + currentMinute;
-
-    // 3. Find if there's an ongoing course (RE-ADDED VALIDATION)
-    // We only mark attendance if there's a valid scheduled course.
-    const course = await Course.findOne({
-      year: student.year,
-      studentClass: student.studentClass,
-      day: currentDay,
-      // Note: courses in DB use "HH:mm AM/PM" or "HH:mm" (24h)
-      // For now we compare by finding the title via the scheduler logic if needed
-      // But simpler: just find the course for this student's year/class on this day/time
-    });
-
-    // We fetch ALL courses for this class today and check time window manually to be safe with formats
+    // 3. Find if there's an ongoing course
     const todayCourses = await Course.find({
       year: student.year,
       studentClass: student.studentClass,
       day: currentDay
     });
 
-    // Manual time parsing to be robust across formats (e.g. 09:00 AM vs 09:00)
     const parseTimeToMinutes = (timeStr) => {
       if (!timeStr) return -1;
       const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
@@ -81,28 +66,32 @@ module.exports = async function markAttendance(data) {
       return currentTimeMinutes >= start && currentTimeMinutes <= end;
     });
 
-    if (!activeCourse) {
-      console.log(`ℹ️ Scan ignored: No active course for ${student.rollNumber} right now (${currentDay} ${timeParts.hour}:${timeParts.minute} IST)`);
-      return;
-    }
+    if (!activeCourse) return; // No active course, ignore scan
 
-    // 4. Check for duplicates (RE-ADDED DUPLICATE PREVENTION)
-    const startOfTodayIST = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    startOfTodayIST.setHours(0, 0, 0, 0);
+    // 4. 🔥 Race Condition Prevention (In-Memory Guard)
+    const lockKey = `${rollUpper}-${activeCourse.title}`;
+    if (processingScans.has(lockKey)) return; // Already being processed
+    processingScans.add(lockKey);
+
+    // 5. Database Duplicate Check (IST-aware)
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const nowIst = new Date(now.getTime() + istOffset);
+    nowIst.setUTCHours(0, 0, 0, 0); 
+    const istStartOfTodayAsUtc = new Date(nowIst.getTime() - istOffset);
 
     const alreadyMarked = await Attendance.findOne({
       studentId: student._id,
       course: activeCourse.title,
-      // We look for records created since start of today (local time)
-      date: { $gte: startOfTodayIST }
+      date: { $gte: istStartOfTodayAsUtc }
     });
 
     if (alreadyMarked) {
-      // Log only occasionally or in debug to avoid console spam
+      // Keep it in memory for 1 minute to stop subsequent MQTT logs, but let DB be the source of truth
+      setTimeout(() => processingScans.delete(lockKey), 60000); 
       return;
     }
 
-    // 5. Create Attendance record
+    // 6. Create Attendance record
     await Attendance.create({
       studentId: student._id,
       userId: student.userId,
@@ -120,8 +109,12 @@ module.exports = async function markAttendance(data) {
     });
 
     console.log(`✅ Attendance Marked: ${student.rollNumber} -> ${activeCourse.title}`);
+    
+    // Cleanup lock after record is saved
+    setTimeout(() => processingScans.delete(lockKey), 60000);
 
   } catch (err) {
+    processingScans.delete(`${rollUpper}-${activeCourse?.title || 'Unknown'}`);
     console.error("❌ Service Error during markAttendance:", err.message);
   }
 };
