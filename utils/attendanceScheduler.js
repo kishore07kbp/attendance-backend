@@ -24,17 +24,28 @@ const parseTimeToMinutes = (timeStr) => {
 
 const sendAbsentList = async () => {
   try {
+    // 1. Calculate current time in IST (Asia/Kolkata)
     const now = new Date();
-    // Use local time for comparison with DB strings
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const currentDay = dayNames[now.getDay()];
-    if (currentDay === 'Sunday') return; // Skip Sundays
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+      weekday: 'long'
+    });
     
-    // Get current minutes since midnight
-    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+    const parts = formatter.formatToParts(now);
+    const timeParts = {};
+    parts.forEach(p => timeParts[p.type] = p.value);
+    
+    const currentDay = timeParts.weekday;
+    if (currentDay === 'Sunday') return; // Skip Sundays
+
+    const currentHour = parseInt(timeParts.hour);
+    const currentMinute = parseInt(timeParts.minute);
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
     
     // We want courses that started EXACTLY 30 minutes ago
-    // (e.g., started at 10:00 AM, now is 10:30 AM)
     const targetStartTimeMinutes = currentTimeInMinutes - 30;
     
     // Fetch all courses for today
@@ -45,16 +56,16 @@ const sendAbsentList = async () => {
       
       // If the course started exactly 30 minutes ago
       if (courseStartTimeMinutes === targetStartTimeMinutes) {
-        console.log(`[Scheduler] Checking attendance for ${course.title} (Started 30m ago)`);
+        console.log(`[Scheduler] 30m mark reached for ${course.title}. Fetching absentees...`);
         
         // 1. Find the Class Advisor for this specific class/year
         const classAdvisor = await Faculty.findOne({
           classAdvisorClass: course.studentClass,
           classAdvisorYear: course.year
-        }).populate('userId', 'email name');
+        });
         
         if (!classAdvisor || !classAdvisor.email) {
-          console.warn(`[Scheduler] No advisor found for ${course.studentClass} ${course.year} Year`);
+          console.warn(`[Scheduler] No advisor found or missing email for ${course.studentClass} ${course.year} Year`);
           continue;
         }
 
@@ -62,7 +73,7 @@ const sendAbsentList = async () => {
         const students = await Student.find({
           studentClass: course.studentClass,
           year: course.year
-        }).populate('userId', 'name email');
+        });
         
         if (students.length === 0) continue;
 
@@ -118,7 +129,8 @@ const sendAbsentList = async () => {
         };
 
         await sendEmail(emailOptions);
-        console.log(`[Scheduler] Absent list sent for ${course.title} to advisor ${classAdvisor.name} (${classAdvisor.email})`);
+        // 🔥 Print console log as requested
+        console.log(`✅ The absent list email is sent to the class advisor email (${classAdvisor.email}) for course: ${course.title}`);
       }
     }
   } catch (error) {
@@ -131,4 +143,4 @@ cron.schedule('* * * * *', () => {
   sendAbsentList();
 });
 
-console.log('[Scheduler] Attendance email scheduler initialized.');
+console.log('[Scheduler] Attendance email scheduler initialized (Asia/Kolkata IST).');
