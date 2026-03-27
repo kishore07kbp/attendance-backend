@@ -17,9 +17,9 @@ const generateToken = (id) => {
 // Register
 router.post('/register', async (req, res) => {
   try {
+    const email = req.body.email?.toLowerCase();
     const {
       name,
-      email,
       password,
       role,
       rollNumber,
@@ -46,62 +46,88 @@ router.post('/register', async (req, res) => {
     }
 
     // Check if user exists
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: 'User already exists' });
-    }
-
-    // Create user
-    const user = await User.create({
-      name,
-      email,
-      password,
-      role: userRole,
-      department: userRole !== 'student' ? department : undefined,
-      studentClass: userRole === 'student' ? studentClass : undefined
-    });
-
-    // If student, create student profile
-    if (userRole === 'student') {
-      await Student.create({
-        userId: user._id,
-        name: user.name,
-        email: user.email,
-        rollNumber,
-        studentClass,
-        year
-      });
-    }
-
-    // If faculty/admin, create faculty profile
-    if (userRole === 'faculty' || userRole === 'admin') {
-      // Check if another faculty is already advisor for this class/year
-      if (classAdvisorClass && classAdvisorClass !== 'None' && classAdvisorYear && classAdvisorYear !== 'None') {
-        const existingAdvisor = await Faculty.findOne({
-          classAdvisorClass,
-          classAdvisorYear
-        });
-
-        if (existingAdvisor) {
-          // Temporarily delete the user we just created to maintain database integrity
-          await User.findByIdAndDelete(user._id);
-          return res.status(400).json({
-            message: `A Class Advisor is already assigned to ${classAdvisorClass} - ${classAdvisorYear} Year (${existingAdvisor.name}).`
-          });
+    let user = await User.findOne({ email });
+    
+    // If user exists, but has no student profile (for a student user), allow re-registration to complete the profile
+    if (user) {
+      if (user.role === 'student') {
+        const studentExists = await Student.findOne({ userId: user._id });
+        if (studentExists) {
+          return res.status(400).json({ message: 'User already exists' });
         }
+        console.log(`User exists but missing student profile for ${email}. Completing profile...`);
+      } else if (user.role === 'faculty' || user.role === 'admin') {
+        const facultyExists = await Faculty.findOne({ userId: user._id });
+        if (facultyExists) {
+          return res.status(400).json({ message: 'User already exists' });
+        }
+        console.log(`User exists but missing faculty profile for ${email}. Completing profile...`);
+      } else {
+        return res.status(400).json({ message: 'User already exists' });
+      }
+    }
+
+    let isNewUser = false;
+    if (!user) {
+      // Create user only if doesn't exist
+      user = await User.create({
+        name,
+        email,
+        password,
+        role: userRole,
+        department: userRole !== 'student' ? department : undefined,
+        studentClass: userRole === 'student' ? studentClass : undefined
+      });
+      isNewUser = true;
+    }
+
+    try {
+      // If student, create student profile
+      if (userRole === 'student') {
+        await Student.create({
+          userId: user._id,
+          name: user.name,
+          email: user.email,
+          rollNumber,
+          studentClass,
+          year
+        });
       }
 
-      await Faculty.create({
-        userId: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        facultyId: facultyId.trim(),
-        department,
-        designation,
-        classAdvisorClass: classAdvisorClass || 'None',
-        classAdvisorYear: classAdvisorYear || 'None'
-      });
+      // If faculty/admin, create faculty profile
+      if (userRole === 'faculty' || userRole === 'admin') {
+        // Check if another faculty is already advisor for this class/year
+        if (classAdvisorClass && classAdvisorClass !== 'None' && classAdvisorYear && classAdvisorYear !== 'None') {
+          const existingAdvisor = await Faculty.findOne({
+            classAdvisorClass,
+            classAdvisorYear
+          });
+          
+          if (existingAdvisor) {
+            // Delete the user we just created only if it was new
+            if (isNewUser) await User.findByIdAndDelete(user._id);
+            return res.status(400).json({ 
+              message: `A Class Advisor is already assigned to ${classAdvisorClass} - ${classAdvisorYear} Year (${existingAdvisor.name}).` 
+            });
+          }
+        }
+
+        await Faculty.create({
+          userId: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          facultyId: facultyId.trim(),
+          department,
+          designation,
+          classAdvisorClass: classAdvisorClass || 'None',
+          classAdvisorYear: classAdvisorYear || 'None'
+        });
+      }
+    } catch (profileError) {
+      // Cleanup if user was new
+      if (isNewUser) await User.findByIdAndDelete(user._id);
+      throw profileError;
     }
 
     const token = generateToken(user._id);
@@ -116,6 +142,7 @@ router.post('/register', async (req, res) => {
         role: user.role
       }
     });
+
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -124,7 +151,8 @@ router.post('/register', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = req.body.email?.toLowerCase();
+    const { password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Please provide email and password' });
@@ -159,6 +187,10 @@ router.get('/me', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     let studentData = null;
     if (user.role === 'student') {
       studentData = await Student.findOne({ userId: user._id });
@@ -180,4 +212,3 @@ router.get('/me', protect, async (req, res) => {
 });
 
 module.exports = router;
-
