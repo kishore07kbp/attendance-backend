@@ -11,8 +11,10 @@ const router = express.Router();
 
 // Helper to calculate daily points
 const getDailyPoints = async (student, date, attendanceCount) => {
+  // 1. Convert date to IST to find dayName
+  const istDate = new Date(new Date(date).toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const dayName = days[new Date(date).getDay()];
+  const dayName = days[istDate.getDay()];
 
   // Get scheduled courses for this student's year/class on this day
   const scheduledCount = await Course.countDocuments({
@@ -413,15 +415,18 @@ router.get('/attendance-stats', protect, async (req, res) => {
       }
     }
 
-    // Today's Stats
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()];
+    // Today's Stats in IST
+    const now = new Date();
+    const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const istStartOfToday = new Date(istNow);
+    istStartOfToday.setHours(0, 0, 0, 0);
+
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][istNow.getDay()];
 
     const [todayAttendance, scheduledToday] = await Promise.all([
       Attendance.find({
         studentId: student._id,
-        date: { $gte: today },
+        date: { $gte: istStartOfToday },
         status: 'present'
       }),
       Course.countDocuments({
