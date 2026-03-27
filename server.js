@@ -6,6 +6,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const mqtt = require("mqtt");
 const markAttendance = require("./services/attendanceService");
+const { updateScannedDevice } = require("./utils/deviceStore");
 
 dotenv.config();
 
@@ -97,7 +98,23 @@ mqttClient.on("message", async (topic, message) => {
 
     console.log("📡 MQTT Data:", data);
 
-    await markAttendance(data); // 🔥 DIRECT CALL
+    // 1. Mark attendance in DB
+    await markAttendance(data); 
+
+    // 2. Update shared device store for scanning UI
+    const { roll, permId, rssi } = data;
+    const deviceData = {
+      name: roll || "Unknown",
+      permanentId: permId,
+      rssi,
+      lastSeen: new Date()
+    };
+    
+    updateScannedDevice(deviceData);
+
+    // 3. Emit live socket event for scanning modal
+    console.log("📡 Emitting BLE detected (MQTT):", deviceData.name);
+    io.emit("ble-device-detected", deviceData);
 
   } catch (err) {
     console.error("❌ MQTT Error:", err.message);

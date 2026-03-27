@@ -2,6 +2,7 @@ const express = require('express');
 const Student = require('../models/Student');
 const { protect, authorize } = require('../middleware/auth');
 const markAttendance = require("../services/attendanceService");
+const { updateScannedDevice, getScannedDevices } = require("../utils/deviceStore");
 
 const router = express.Router();
 
@@ -10,7 +11,7 @@ const router = express.Router();
 Temporary memory store for scanned BLE devices
 --------------------------------------------------
 */
-let scannedDevices = [];
+// Moved to utils/deviceStore.js
 
 // ESP32 sends scanned BLE device to /api/devices/scan
 router.post('/scan', async (req, res) => {
@@ -29,15 +30,11 @@ router.post('/scan', async (req, res) => {
       lastSeen: new Date()
     };
 
-    const index = scannedDevices.findIndex(d => d.permanentId === permId);
-    if (index !== -1) {
-      scannedDevices[index] = deviceData;
-    } else {
-      scannedDevices.push(deviceData);
-    }
+    updateScannedDevice(deviceData);
 
     const io = req.app.get("io");
     if (io) {
+      console.log("📡 Emitting BLE detected:", deviceData.name);
       io.emit("ble-device-detected", deviceData);
     }
 
@@ -54,19 +51,12 @@ Frontend fetch scanned BLE devices
 --------------------------------------------------
 */
 router.get('/ble-devices', protect, (req, res) => {
-  const now = Date.now();
-  const TTL = 5 * 1000; // 5 seconds
-  
-  // Clean up on the fly before returning
-  scannedDevices = scannedDevices.filter(d => {
-    const lastSeenTime = new Date(d.lastSeen).getTime();
-    return (now - lastSeenTime) < TTL;
-  });
+  const freshDevices = getScannedDevices();
 
   res.json({
     success: true,
-    devices: scannedDevices,
-    count: scannedDevices.length
+    devices: freshDevices,
+    count: freshDevices.length
   });
 
 });
@@ -88,7 +78,7 @@ router.post('/verify', async (req, res) => {
       });
     }
 
-    const device = scannedDevices.find(
+    const device = getScannedDevices().find(
       d => d.permanentId === permanentId
     );
 
