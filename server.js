@@ -4,6 +4,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
 const socketIo = require('socket.io');
+const mqtt = require("mqtt");
+const markAttendance = require("./services/attendanceService");
 
 dotenv.config();
 
@@ -51,6 +53,57 @@ mongoose.connect(process.env.MONGODB_URI)
     process.exit(1); // stop server if DB fails
   });
 
+/*
+---------------------------------------
+MQTT SETUP (DEPLOY READY)
+---------------------------------------
+*/
+console.log("🚀 MQTT Initializing...");
+
+const mqttClient = mqtt.connect("mqtt://broker.hivemq.com");
+
+mqttClient.on("connect", () => {
+  console.log("✅ MQTT Connected (Server)");
+
+  mqttClient.subscribe("attendance/data", (err) => {
+    if (err) {
+      console.log("❌ MQTT Subscribe Error:", err.message);
+    } else {
+      console.log("📡 Subscribed to attendance/data");
+    }
+  });
+});
+
+mqttClient.on("error", (err) => {
+  console.log("❌ MQTT Error:", err.message);
+});
+
+mqttClient.on("reconnect", () => {
+  console.log("🔄 MQTT Reconnecting...");
+});
+
+mqttClient.on("offline", () => {
+  console.log("⚠️ MQTT Offline");
+});
+
+/*
+---------------------------------------
+MQTT MESSAGE HANDLER
+---------------------------------------
+*/
+mqttClient.on("message", async (topic, message) => {
+  try {
+    const data = JSON.parse(message.toString());
+
+    console.log("📡 MQTT Data:", data);
+
+    await markAttendance(data); // 🔥 DIRECT CALL
+
+  } catch (err) {
+    console.error("❌ MQTT Error:", err.message);
+  }
+});
+
 // ✅ Health check route (useful for Render)
 app.get("/", (req, res) => {
   res.send("Smart Attendance Backend Running 🚀");
@@ -88,13 +141,8 @@ app.post("/api/esp32-scan", async (req, res) => {
     CALL YOUR EXISTING LOGIC
     ---------------------------------------
     */
-    const axios = require("axios");
 
-    await axios.post("https://attendance-backend-i6mj.onrender.com/api/devices/scan", {
-      roll,
-      permId,
-      rssi
-    });
+    await markAttendance({ roll, permId, rssi });
 
     console.log(`✅ Attendance Marked → ${roll}`);
 

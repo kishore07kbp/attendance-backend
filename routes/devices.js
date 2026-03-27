@@ -1,6 +1,7 @@
 const express = require('express');
 const Student = require('../models/Student');
 const { protect, authorize } = require('../middleware/auth');
+const markAttendance = require("../services/attendanceService");
 
 const router = express.Router();
 
@@ -17,6 +18,10 @@ router.post('/scan', async (req, res) => {
 
   try {
     const { roll, permId, rssi } = req.body;
+
+    // 🔥 ADD THIS LINE
+    await markAttendance({ roll, permId, rssi });
+
     const deviceData = {
       name: roll || "Unknown",
       permanentId: permId,

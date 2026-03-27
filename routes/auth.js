@@ -36,7 +36,7 @@ router.post('/register', async (req, res) => {
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Please provide all core required fields' });
     }
-    
+
     const userRole = role || 'student';
     if (userRole === 'student' && (!rollNumber || !year || !studentClass)) {
       return res.status(400).json({ message: 'Roll number, Class, and Year are required for students' });
@@ -81,12 +81,12 @@ router.post('/register', async (req, res) => {
           classAdvisorClass,
           classAdvisorYear
         });
-        
+
         if (existingAdvisor) {
           // Temporarily delete the user we just created to maintain database integrity
           await User.findByIdAndDelete(user._id);
-          return res.status(400).json({ 
-            message: `A Class Advisor is already assigned to ${classAdvisorClass} - ${classAdvisorYear} Year (${existingAdvisor.name}).` 
+          return res.status(400).json({
+            message: `A Class Advisor is already assigned to ${classAdvisorClass} - ${classAdvisorYear} Year (${existingAdvisor.name}).`
           });
         }
       }
@@ -158,7 +158,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    
+
     let studentData = null;
     if (user.role === 'student') {
       studentData = await Student.findOne({ userId: user._id });
