@@ -22,6 +22,7 @@ module.exports = async function markAttendance(data) {
     timeZone: 'Asia/Kolkata',
     hour: 'numeric',
     minute: 'numeric',
+    second: 'numeric',
     hour12: false,
     weekday: 'long'
   });
@@ -32,6 +33,10 @@ module.exports = async function markAttendance(data) {
 
   const currentDay = timeParts.weekday;
   const currentTimeMinutes = parseInt(timeParts.hour) * 60 + parseInt(timeParts.minute);
+  const hourNum = parseInt(timeParts.hour);
+  const displayHour = hourNum % 12 || 12;
+  const ampm = hourNum >= 12 ? 'PM' : 'AM';
+  const finalTimeString = `${displayHour}:${timeParts.minute.padStart(2, '0')}:${timeParts.second.padStart(2, '0')} ${ampm}`;
 
   try {
     // 2. Find the student
@@ -96,7 +101,7 @@ module.exports = async function markAttendance(data) {
       studentId: student._id,
       userId: student.userId,
       date: now,
-      time: now.toLocaleTimeString(),
+      time: finalTimeString,
       status: 'present',
       faceVerified: false,
       bleVerified: true,

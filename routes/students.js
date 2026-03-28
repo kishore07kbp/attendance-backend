@@ -326,6 +326,20 @@ router.post('/mark-attendance', protect, async (req, res) => {
     });
 
     if (existingAttendance) {
+      // Logic for upgrade: If it was marked by system (BLE only) and now we have face verification
+      if (existingAttendance.markedBy === 'system' && !existingAttendance.faceVerified && faceVerified) {
+        existingAttendance.faceVerified = true;
+        existingAttendance.bleVerified = true; // confirm BLE link matches student too
+        existingAttendance.remarks = `Upgraded to Face Verified (${existingAttendance.remarks})`;
+        await existingAttendance.save();
+        
+        return res.json({
+          success: true,
+          message: "Face scan verified and added to initial BLE ping",
+          attendance: existingAttendance
+        });
+      }
+      
       return res.status(400).json({
         message: "Attendance already marked today"
       });
@@ -336,6 +350,8 @@ router.post('/mark-attendance', protect, async (req, res) => {
     /////////////////////////////////////////////////////////
 
     const now = new Date();
+    const istOptions = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+    const istTimeStr = now.toLocaleTimeString('en-US', istOptions);
 
     const attendance = await Attendance.create({
 
@@ -343,7 +359,7 @@ router.post('/mark-attendance', protect, async (req, res) => {
       userId: req.user._id,
 
       date: now,
-      time: now.toLocaleTimeString(),
+      time: istTimeStr,
 
       status: bleVerified ? "present" : "absent",
 
@@ -394,12 +410,13 @@ router.get('/attendance-stats', protect, async (req, res) => {
       status: 'present'
     });
 
-    // Group by date to calculate points
+    const istOffset = 5.5 * 60 * 60 * 1000;
     const groupedByDate = {};
     allAttendance.forEach(att => {
       if (!att.date) return;
       try {
-        const dateKey = new Date(att.date).toISOString().split('T')[0];
+        const istDate = new Date(new Date(att.date).getTime() + istOffset);
+        const dateKey = istDate.toISOString().split('T')[0];
         groupedByDate[dateKey] = (groupedByDate[dateKey] || 0) + 1;
       } catch (e) {
         console.warn("Invalid date in attendance record for stats:", att.date);
@@ -419,7 +436,6 @@ router.get('/attendance-stats', protect, async (req, res) => {
     }
 
     // Today's Stats in IST
-    const istOffset = 5.5 * 60 * 60 * 1000;
     const now = new Date();
     const istNow = new Date(now.getTime() + istOffset);
     const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][istNow.getUTCDay()];
@@ -485,12 +501,13 @@ router.get('/attendance-history', protect, async (req, res) => {
       studentId: student._id
     }).sort({ date: -1 });
 
-    // Group by date for daily summaries (used by chart)
+    const istOffset = 5.5 * 60 * 60 * 1000;
     const grouped = {};
     attendance.forEach(att => {
       if (!att.date) return;
       try {
-        const dateKey = new Date(att.date).toISOString().split('T')[0];
+        const istDate = new Date(new Date(att.date).getTime() + istOffset);
+        const dateKey = istDate.toISOString().split('T')[0];
         if (!grouped[dateKey]) grouped[dateKey] = { count: 0, date: dateKey };
         if (att.status === 'present') grouped[dateKey].count++;
       } catch (e) {
