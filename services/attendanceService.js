@@ -3,7 +3,7 @@ const Attendance = require("../models/Attendance");
 const Course = require("../models/Course");
 
 // 🔥 In-memory lock to prevent race conditions from high-frequency MQTT scans
-const processingScans = new Set(); 
+const processingScans = new Set();
 
 /**
  * Shared service for marking attendance from scans (MQTT/HTTP).
@@ -25,11 +25,11 @@ module.exports = async function markAttendance(data) {
     hour12: false,
     weekday: 'long'
   });
-  
+
   const parts = formatter.formatToParts(now);
   const timeParts = {};
   parts.forEach(p => timeParts[p.type] = p.value);
-  
+
   const currentDay = timeParts.weekday;
   const currentTimeMinutes = parseInt(timeParts.hour) * 60 + parseInt(timeParts.minute);
 
@@ -76,7 +76,7 @@ module.exports = async function markAttendance(data) {
     // 5. Database Duplicate Check (IST-aware)
     const istOffset = 5.5 * 60 * 60 * 1000;
     const nowIst = new Date(now.getTime() + istOffset);
-    nowIst.setUTCHours(0, 0, 0, 0); 
+    nowIst.setUTCHours(0, 0, 0, 0);
     const istStartOfTodayAsUtc = new Date(nowIst.getTime() - istOffset);
 
     const alreadyMarked = await Attendance.findOne({
@@ -87,7 +87,7 @@ module.exports = async function markAttendance(data) {
 
     if (alreadyMarked) {
       // Keep it in memory for 1 minute to stop subsequent MQTT logs, but let DB be the source of truth
-      setTimeout(() => processingScans.delete(lockKey), 60000); 
+      setTimeout(() => processingScans.delete(lockKey), 60000);
       return;
     }
 
@@ -109,7 +109,7 @@ module.exports = async function markAttendance(data) {
     });
 
     console.log(`✅ Attendance Marked: ${student.rollNumber} -> ${activeCourse.title}`);
-    
+
     // Cleanup lock after record is saved
     setTimeout(() => processingScans.delete(lockKey), 60000);
 

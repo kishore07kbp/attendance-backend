@@ -3,6 +3,7 @@ const router = express.Router();
 const Course = require('../models/Course');
 const Faculty = require('../models/Faculty');
 const Student = require('../models/Student');
+const Attendance = require('../models/Attendance');
 const { protect, authorize } = require('../middleware/auth');
 
 // POST /api/courses
@@ -10,7 +11,7 @@ const { protect, authorize } = require('../middleware/auth');
 router.post('/', protect, authorize('faculty', 'admin'), async (req, res) => {
   try {
     const { title, year, studentClass, day, startTime, endTime } = req.body;
-    
+
     if (!title || !year || !studentClass || !day || !startTime || !endTime) {
       return res.status(400).json({ message: 'Please provide all course fields' });
     }
@@ -56,11 +57,11 @@ router.get('/student', protect, authorize('student'), async (req, res) => {
     const student = await Student.findOne({ userId: req.user._id });
     if (!student) return res.status(404).json({ message: 'Student profile not found' });
 
-    const courses = await Course.find({ 
-      year: student.year, 
-      studentClass: student.studentClass 
+    const courses = await Course.find({
+      year: student.year,
+      studentClass: student.studentClass
     }).sort({ title: 1 });
-    
+
     res.json({ success: true, courses });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -86,8 +87,15 @@ router.delete('/:id', protect, authorize('faculty', 'admin'), async (req, res) =
       return res.status(403).json({ message: 'Not authorized to delete this course' });
     }
 
+    // Cleanup: Delete all attendance records associated with this course instance
+    await Attendance.deleteMany({
+      course: course.title,
+      studentClass: course.studentClass,
+      year: course.year
+    });
+
     await Course.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Course deleted successfully' });
+    res.json({ success: true, message: 'Course deleted successfully and linked attendance records removed' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
