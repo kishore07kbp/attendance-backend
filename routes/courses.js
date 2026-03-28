@@ -87,15 +87,17 @@ router.delete('/:id', protect, authorize('faculty', 'admin'), async (req, res) =
       return res.status(403).json({ message: 'Not authorized to delete this course' });
     }
 
-    // Cleanup: Delete all attendance records associated with this course instance
-    await Attendance.deleteMany({
-      course: course.title,
+    // Cleanup: Delete all attendance records associated with this course instance (Case-Insensitive Match)
+    const deletedAttendance = await Attendance.deleteMany({
+      course: { $regex: new RegExp(`^${course.title}$`, "i") },
       studentClass: course.studentClass,
       year: course.year
     });
 
+    console.log(`✅ Course Deleted: ${course.title} | Wiped ${deletedAttendance.deletedCount} attendance records from DB.`);
+
     await Course.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Course deleted successfully and linked attendance records removed' });
+    res.json({ success: true, message: 'Course deleted and all linked database records were permanently removed' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
