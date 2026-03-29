@@ -61,7 +61,15 @@ MQTT SETUP (DEPLOY READY)
 */
 console.log("🚀 MQTT Initializing...");
 
-const mqttClient = mqtt.connect("mqtt://broker.hivemq.com");
+// ✅ CONNECT TO YOUR HIVEMQ CLOUD (SECURE)
+const mqttClient = mqtt.connect(
+  "mqtts://27cec626f3474fd09530f6b6deb25afb.s1.eu.hivemq.cloud:8883",
+  {
+    username: "esp32user",
+    password: "@Bunktracer1",
+    rejectUnauthorized: false // ⚠️ required for now
+  }
+);
 
 mqttClient.on("connect", () => {
   console.log("✅ MQTT Connected (Server)");
