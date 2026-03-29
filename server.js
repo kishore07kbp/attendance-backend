@@ -99,7 +99,7 @@ mqttClient.on("message", async (topic, message) => {
     console.log("📡 MQTT Data:", data);
 
     // 1. Mark attendance in DB
-    await markAttendance(data); 
+    await markAttendance(data);
 
     // 2. Update shared device store for scanning UI
     const { roll, permId, rssi } = data;
@@ -109,7 +109,7 @@ mqttClient.on("message", async (topic, message) => {
       rssi,
       lastSeen: new Date()
     };
-    
+
     updateScannedDevice(deviceData);
 
     // 3. Emit live socket event for scanning modal
