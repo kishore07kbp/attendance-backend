@@ -6,6 +6,7 @@ const Course = require('../models/Course');
 const Faculty = require('../models/Faculty');
 const { protect } = require('../middleware/auth');
 const faceRecognition = require('../utils/faceRecognition');
+const { updateStudentInCache } = require('../utils/studentCache');
 
 const router = express.Router();
 
@@ -118,6 +119,9 @@ router.put('/profile', protect, async (req, res) => {
     }
 
     await student.save();
+    
+    // 🚀 Update RAM Cache
+    updateStudentInCache(student);
 
     res.json({
       success: true,
@@ -246,6 +250,9 @@ router.post('/register-permanent-id', protect, async (req, res) => {
     student.permanentId = permanentId;
 
     await student.save();
+
+    // 🚀 Update RAM Cache
+    updateStudentInCache(student);
 
     res.json({
       success: true,

@@ -20,11 +20,11 @@ router.post('/scan', async (req, res) => {
   try {
     const { roll, permId, rssi } = req.body;
 
-    // 🔥 ADD THIS LINE
-    await markAttendance({ roll, permId, rssi });
+    // 🔥 Mark attendance and get student info
+    const student = await markAttendance({ roll, permId, rssi });
 
     const deviceData = {
-      name: roll || "Unknown",
+      name: student ? student.rollNumber : (roll || "Unknown"),
       permanentId: permId,
       rssi,
       lastSeen: new Date()
@@ -34,11 +34,11 @@ router.post('/scan', async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
-      console.log("📡 Emitting BLE detected:", deviceData.name);
+      console.log("📡 Emitting BLE detected (HTTP):", deviceData.name);
       io.emit("ble-device-detected", deviceData);
     }
 
-    res.json({ success: true, roll: roll });
+    res.json({ success: true, roll: student ? student.rollNumber : (roll || "Unknown") });
 
   } catch (error) {
     res.status(500).json({ message: "BLE scan error", error: error.message });

@@ -1,18 +1,30 @@
 const express = require("express");
 const router = express.Router();
+const markAttendance = require("../services/attendanceService");
 
-router.post("/ble-device", (req, res) => {
+router.post("/ble-device", async (req, res) => {
 
-  const device = req.body;
+  const { roll, permId, rssi } = req.body;
 
-  console.log("BLE Device Received:", device);
+  // 🚀 Map ID to Student Roll Number
+  const student = await markAttendance({ roll, permId, rssi });
+
+  const deviceData = {
+    name: student ? student.rollNumber : (roll || "Unknown"),
+    permanentId: permId,
+    rssi,
+    lastSeen: new Date()
+  };
 
   const io = req.app.get("io");
 
-  io.emit("ble-device-detected", device);
+  if (io) {
+    console.log("📡 Emitting BLE detected (Stream):", deviceData.name);
+    io.emit("ble-device-detected", deviceData);
+  }
 
-  res.json({ success: true });
+  res.json({ success: true, studentIdentified: !!student });
 
 });
 
-module.exports = router;
+module.exports = router;

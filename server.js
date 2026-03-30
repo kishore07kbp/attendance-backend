@@ -7,6 +7,7 @@ const socketIo = require('socket.io');
 const mqtt = require("mqtt");
 const markAttendance = require("./services/attendanceService");
 const { updateScannedDevice } = require("./utils/deviceStore");
+const { initStudentCache } = require('./utils/studentCache');
 
 dotenv.config();
 
@@ -48,7 +49,11 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ✅ MongoDB Connection (SAFE)
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log("MongoDB Connected"))
+  .then(async () => {
+    console.log("✅ MongoDB Connected");
+    // 🚀 Start student cache for fast lookups
+    await initStudentCache();
+  })
   .catch(err => {
     console.error("MongoDB connection error:", err);
     process.exit(1); // stop server if DB fails
@@ -98,13 +103,13 @@ mqttClient.on("message", async (topic, message) => {
 
     console.log("📡 MQTT Data:", data);
 
-    // 1. Mark attendance in DB
-    await markAttendance(data);
+    // 1. Mark attendance in DB & get student info
+    const student = await markAttendance(data);
 
     // 2. Update shared device store for scanning UI
-    const { roll, permId, rssi } = data;
+    const { permId, rssi } = data;
     const deviceData = {
-      name: roll || "Unknown",
+      name: student ? student.rollNumber : (data.roll || "Unknown"),
       permanentId: permId,
       rssi,
       lastSeen: new Date()
@@ -149,8 +154,8 @@ app.post("/api/esp32-scan", async (req, res) => {
     const { roll, permId, rssi } = req.body;
 
     // 🔥 OPTIONAL: Validate data
-    if (!roll || !permId) {
-      return res.status(400).json({ message: "Invalid data" });
+    if (!roll && !permId) {
+      return res.status(400).json({ message: "Roll No or Permanent ID required" });
     }
 
     /*
@@ -159,14 +164,36 @@ app.post("/api/esp32-scan", async (req, res) => {
     ---------------------------------------
     */
 
-    await markAttendance({ roll, permId, rssi });
+    const student = await markAttendance({ roll, permId, rssi });
 
-    console.log(`✅ Attendance Marked → ${roll}`);
+    if (student) {
+      console.log(`✅ Scan Processed for ${student.rollNumber}`);
+      
+      // Also update device store and emit to frontend for HTTP scans
+      const deviceData = {
+        name: student.rollNumber,
+        permanentId: student.permanentId,
+        rssi: rssi || 0,
+        lastSeen: new Date()
+      };
+      
+      updateScannedDevice(deviceData);
+      io.emit("ble-device-detected", deviceData);
 
-    res.status(200).json({
-      success: true,
-      message: "Data received successfully"
-    });
+      res.status(200).json({
+        success: true,
+        message: "Data received and matched",
+        student: {
+          name: student.name,
+          rollNumber: student.rollNumber
+        }
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: "Student not found for provided ID"
+      });
+    }
 
   } catch (error) {
     console.error("❌ ESP32 Error:", error);

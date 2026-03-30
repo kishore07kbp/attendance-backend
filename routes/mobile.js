@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const Student = require("../models/Student");
 const User = require("../models/User");
 const sendEmail = require("../utils/emailSender");
+const { updateStudentInCache } = require("../utils/studentCache");
 
 const router = express.Router();
 
@@ -173,6 +174,9 @@ router.post("/verify-otp", async (req, res) => {
     student.permanentId = permanentID;
 
     await student.save();
+    
+    // 🚀 Update RAM Cache
+    updateStudentInCache(student);
 
     delete otpStore[phoneNumber];
 

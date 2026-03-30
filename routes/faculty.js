@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const Faculty = require('../models/Faculty');
 const { protect, authorize } = require('../middleware/auth');
+const { updateStudentInCache, removeFromCache } = require('../utils/studentCache');
 
 const router = express.Router();
 
@@ -168,6 +169,9 @@ router.post('/students', async (req, res) => {
       year
     });
 
+    // 🚀 Update RAM Cache
+    updateStudentInCache(student);
+
     res.status(201).json({
       success: true,
       message: 'Student created successfully',
@@ -194,6 +198,9 @@ router.put('/students/:id', async (req, res) => {
 
     await student.save();
 
+    // 🚀 Update RAM Cache
+    updateStudentInCache(student);
+
     res.json({
       success: true,
       message: 'Student updated successfully',
@@ -216,6 +223,9 @@ router.delete('/students/:id', async (req, res) => {
     await User.findByIdAndDelete(student.userId);
     // Delete student
     await Student.findByIdAndDelete(req.params.id);
+
+    // 🚀 Remove from RAM Cache
+    removeFromCache(student);
 
     res.json({ success: true, message: 'Student deleted successfully' });
   } catch (error) {

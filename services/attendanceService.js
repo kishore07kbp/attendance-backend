@@ -1,6 +1,7 @@
 const Student = require("../models/Student");
 const Attendance = require("../models/Attendance");
 const Course = require("../models/Course");
+const { getStudentByPermId, getStudentByRoll } = require("../utils/studentCache");
 
 // 🔥 In-memory lock to prevent race conditions from high-frequency MQTT scans
 const processingScans = new Set();
@@ -8,13 +9,43 @@ const processingScans = new Set();
 /**
  * Shared service for marking attendance from scans (MQTT/HTTP).
  * Centralizes duplicate checks and course identification.
- * Uses consistent IST (Asia/Kolkata) timezone.
  */
 module.exports = async function markAttendance(data) {
   const { roll, permId, rssi } = data;
-  if (!roll) return;
+  
+  // 🚀 Robust Trimming (ESP32 sometimes sends \r\n or spaces)
+  const cleanPermId = permId ? permId.toString().trim() : null;
+  const cleanRoll = roll ? roll.toString().trim().toUpperCase() : null;
 
-  const rollUpper = roll.toUpperCase();
+  console.log(`📡 [DEBUG] markAttendance lookup: roll=${cleanRoll}, permId=${cleanPermId}`);
+
+  // 🚀 Resolve student via RAM Cache (Super Fast)
+  let student = cleanRoll ? getStudentByRoll(cleanRoll) : getStudentByPermId(cleanPermId);
+
+  if (student) {
+      console.log(`✅ [DEBUG] Student found in Cache: ${student.rollNumber}`);
+  }
+
+  // Fallback: If not in cache, check DB
+  if (!student) {
+    console.log(`🔍 [DEBUG] Student not in cache, checking MongoDB...`);
+    if (cleanRoll) {
+      student = await Student.findOne({ rollNumber: cleanRoll });
+    } else if (cleanPermId) {
+      student = await Student.findOne({ permanentId: cleanPermId });
+    }
+    
+    if (student) {
+        console.log(`✅ [DEBUG] Student found in DB: ${student.rollNumber}`);
+    }
+  }
+
+  if (!student) {
+    console.log(`❌ [DEBUG] Student not found for ${cleanRoll ? 'Roll: ' + cleanRoll : 'PermID: ' + cleanPermId}`);
+    return null;
+  }
+
+  const rollUpper = student.rollNumber;
   const now = new Date();
 
   // 1. Identify current time/day in IST (Asia/Kolkata)
@@ -39,14 +70,7 @@ module.exports = async function markAttendance(data) {
   const finalTimeString = `${displayHour}:${timeParts.minute.padStart(2, '0')}:${timeParts.second.padStart(2, '0')} ${ampm}`;
 
   try {
-    // 2. Find the student
-    const student = await Student.findOne({ rollNumber: rollUpper });
-    if (!student) {
-      console.log(`❌ Student not found for Roll: ${rollUpper}`);
-      return;
-    }
-
-    // 3. Find if there's an ongoing course
+    // 3. Find if there's an ongoing course (Still requires DB lookup, but minimized to current day/class)
     const todayCourses = await Course.find({
       year: student.year,
       studentClass: student.studentClass,
@@ -71,11 +95,13 @@ module.exports = async function markAttendance(data) {
       return currentTimeMinutes >= start && currentTimeMinutes <= end;
     });
 
-    if (!activeCourse) return; // No active course, ignore scan
+    if (!activeCourse) {
+      return student;
+    }
 
     // 4. 🔥 Race Condition Prevention (In-Memory Guard)
     const lockKey = `${rollUpper}-${activeCourse.title}`;
-    if (processingScans.has(lockKey)) return; // Already being processed
+    if (processingScans.has(lockKey)) return student;
     processingScans.add(lockKey);
 
     // 5. Database Duplicate Check (IST-aware)
@@ -91,9 +117,8 @@ module.exports = async function markAttendance(data) {
     });
 
     if (alreadyMarked) {
-      // Keep it in memory for 1 minute to stop subsequent MQTT logs, but let DB be the source of truth
       setTimeout(() => processingScans.delete(lockKey), 60000);
-      return;
+      return student;
     }
 
     // 6. Create Attendance record
@@ -114,12 +139,12 @@ module.exports = async function markAttendance(data) {
     });
 
     console.log(`✅ Attendance Marked: ${student.rollNumber} -> ${activeCourse.title}`);
-
-    // Cleanup lock after record is saved
     setTimeout(() => processingScans.delete(lockKey), 60000);
 
+    return student;
+
   } catch (err) {
-    processingScans.delete(`${rollUpper}-${activeCourse?.title || 'Unknown'}`);
     console.error("❌ Service Error during markAttendance:", err.message);
+    return null;
   }
 };

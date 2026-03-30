@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Student = require('../models/Student');
 const Faculty = require('../models/Faculty');
 const { protect } = require('../middleware/auth');
+const { updateStudentInCache } = require('../utils/studentCache');
 
 const router = express.Router();
 
@@ -84,7 +85,7 @@ router.post('/register', async (req, res) => {
     try {
       // If student, create student profile
       if (userRole === 'student') {
-        await Student.create({
+        const student = await Student.create({
           userId: user._id,
           name: user.name,
           email: user.email,
@@ -92,6 +93,9 @@ router.post('/register', async (req, res) => {
           studentClass,
           year
         });
+
+        // 🚀 Update RAM Cache
+        updateStudentInCache(student);
       }
 
       // If faculty/admin, create faculty profile
