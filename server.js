@@ -100,25 +100,25 @@ MQTT MESSAGE HANDLER
 mqttClient.on("message", async (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
-
-    console.log("📡 MQTT Data:", data);
-
-    // 1. Mark attendance in DB & get student info
-    const student = await markAttendance(data);
-
-    // 2. Update shared device store for scanning UI
     const { permId, rssi } = data;
+
+    console.log("📡 MQTT Data received (Passive Scan):", { permId, rssi });
+
+    // 🚀 Only IDENTIFY the student for the live UI, do NOT mark attendance
+    const { getStudentByPermId } = require("./utils/studentCache");
+    const student = getStudentByPermId(permId);
+
     const deviceData = {
-      name: student ? student.rollNumber : (data.roll || "Unknown"),
+      name: student ? student.rollNumber : "Unknown Device",
       permanentId: permId,
       rssi,
       lastSeen: new Date()
     };
 
+    // Update shared device store for scanning UI
     updateScannedDevice(deviceData);
 
-    // 3. Emit live socket event for scanning modal
-    console.log("📡 Emitting BLE detected (MQTT):", deviceData.name);
+    // Emit live socket event for scanning modal
     io.emit("ble-device-detected", deviceData);
 
   } catch (err) {
@@ -148,59 +148,38 @@ ESP32 HTTP Route (NEW)
 */
 app.post("/api/esp32-scan", async (req, res) => {
   try {
-    console.log("📡 ESP32 Data Received:", req.body);
+    const { permId, rssi } = req.body;
 
-    // 🔥 Extract data
-    const { roll, permId, rssi } = req.body;
-
-    // 🔥 OPTIONAL: Validate data
-    if (!roll && !permId) {
-      return res.status(400).json({ message: "Roll No or Permanent ID required" });
+    if (!permId) {
+      return res.status(400).json({ message: "Permanent ID required" });
     }
 
-    /*
-    ---------------------------------------
-    CALL YOUR EXISTING LOGIC
-    ---------------------------------------
-    */
+    console.log("📡 ESP32 HTTP Scan Received:", { permId, rssi });
 
-    const student = await markAttendance({ roll, permId, rssi });
+    // 🚀 Only IDENTIFY the student for the live UI, do NOT mark attendance
+    const { getStudentByPermId } = require("./utils/studentCache");
+    const student = getStudentByPermId(permId);
 
-    if (student) {
-      console.log(`✅ Scan Processed for ${student.rollNumber}`);
-      
-      // Also update device store and emit to frontend for HTTP scans
-      const deviceData = {
-        name: student.rollNumber,
-        permanentId: student.permanentId,
-        rssi: rssi || 0,
-        lastSeen: new Date()
-      };
-      
-      updateScannedDevice(deviceData);
-      io.emit("ble-device-detected", deviceData);
+    const deviceData = {
+      name: student ? student.rollNumber : "Unknown Device",
+      permanentId: permId,
+      rssi: rssi || 0,
+      lastSeen: new Date()
+    };
 
-      res.status(200).json({
-        success: true,
-        message: "Data received and matched",
-        student: {
-          name: student.name,
-          rollNumber: student.rollNumber
-        }
-      });
-    } else {
-      res.status(404).json({
-        success: false,
-        message: "Student not found for provided ID"
-      });
-    }
+    // Update shared device store and emit to frontend
+    updateScannedDevice(deviceData);
+    io.emit("ble-device-detected", deviceData);
+
+    res.status(200).json({
+      success: true,
+      message: "Device detected and broadcasted",
+      student: student ? { name: student.name, rollNumber: student.rollNumber } : null
+    });
 
   } catch (error) {
-    console.error("❌ ESP32 Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
+    console.error("❌ ESP32 Route Error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 

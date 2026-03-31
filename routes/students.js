@@ -119,7 +119,7 @@ router.put('/profile', protect, async (req, res) => {
     }
 
     await student.save();
-    
+
     // 🚀 Update RAM Cache
     updateStudentInCache(student);
 
@@ -339,14 +339,14 @@ router.post('/mark-attendance', protect, async (req, res) => {
         existingAttendance.bleVerified = true; // confirm BLE link matches student too
         existingAttendance.remarks = `Upgraded to Face Verified (${existingAttendance.remarks})`;
         await existingAttendance.save();
-        
+
         return res.json({
           success: true,
           message: "Face scan verified and added to initial BLE ping",
           attendance: existingAttendance
         });
       }
-      
+
       return res.status(400).json({
         message: "Attendance already marked today"
       });
@@ -446,7 +446,7 @@ router.get('/attendance-stats', protect, async (req, res) => {
     const now = new Date();
     const istNow = new Date(now.getTime() + istOffset);
     const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][istNow.getUTCDay()];
-    
+
     istNow.setUTCHours(0, 0, 0, 0); // Midnight IST
     const istStartOfTodayAsUtc = new Date(istNow.getTime() - istOffset);
 

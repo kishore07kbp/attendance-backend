@@ -12,7 +12,7 @@ const processingScans = new Set();
  */
 module.exports = async function markAttendance(data) {
   const { roll, permId, rssi } = data;
-  
+
   // 🚀 Robust Trimming (ESP32 sometimes sends \r\n or spaces)
   const cleanPermId = permId ? permId.toString().trim() : null;
   const cleanRoll = roll ? roll.toString().trim().toUpperCase() : null;
@@ -23,7 +23,7 @@ module.exports = async function markAttendance(data) {
   let student = cleanRoll ? getStudentByRoll(cleanRoll) : getStudentByPermId(cleanPermId);
 
   if (student) {
-      console.log(`✅ [DEBUG] Student found in Cache: ${student.rollNumber}`);
+    console.log(`✅ [DEBUG] Student found in Cache: ${student.rollNumber}`);
   }
 
   // Fallback: If not in cache, check DB
@@ -34,9 +34,9 @@ module.exports = async function markAttendance(data) {
     } else if (cleanPermId) {
       student = await Student.findOne({ permanentId: cleanPermId });
     }
-    
+
     if (student) {
-        console.log(`✅ [DEBUG] Student found in DB: ${student.rollNumber}`);
+      console.log(`✅ [DEBUG] Student found in DB: ${student.rollNumber}`);
     }
   }
 

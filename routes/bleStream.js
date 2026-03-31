@@ -4,15 +4,16 @@ const markAttendance = require("../services/attendanceService");
 
 router.post("/ble-device", async (req, res) => {
 
-  const { roll, permId, rssi } = req.body;
+  const { permId, rssi, roll } = req.body;
 
-  // 🚀 Map ID to Student Roll Number
-  const student = await markAttendance({ roll, permId, rssi });
+  // 🚀 Map ID to Student Roll Number ONLY, do NOT mark attendance
+  const { getStudentByPermId, getStudentByRoll } = require("../utils/studentCache");
+  const student = (permId) ? getStudentByPermId(permId) : (roll ? getStudentByRoll(roll) : null);
 
   const deviceData = {
-    name: student ? student.rollNumber : (roll || "Unknown"),
+    name: student ? student.rollNumber : (roll || "Unknown Device"),
     permanentId: permId,
-    rssi,
+    rssi: rssi || 0,
     lastSeen: new Date()
   };
 
