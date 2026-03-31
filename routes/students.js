@@ -282,8 +282,67 @@ router.post('/mark-attendance', protect, async (req, res) => {
     const student = await Student.findOne({ userId: req.user._id });
 
     if (!student) {
-      return res.status(404).json({
-        message: "Student not found"
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    /////////////////////////////////////////////////////////
+    // 🛡️ REJECT COURSE MISMATCH (AUTO-CALCULATE ACTIVE COURSE)
+    /////////////////////////////////////////////////////////
+
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+      weekday: 'long'
+    });
+
+    const parts = formatter.formatToParts(now);
+    const timeParts = {};
+    parts.forEach(p => timeParts[p.type] = p.value);
+
+    const currentDay = timeParts.weekday;
+    const currentTimeMinutes = parseInt(timeParts.hour) * 60 + parseInt(timeParts.minute);
+
+    // Finding scheduled courses for this student's Year/Class on this specific Day
+    const todayCourses = await Course.find({
+      year: student.year,
+      studentClass: student.studentClass,
+      day: currentDay
+    });
+
+    const parseTimeToMinutes = (timeStr) => {
+      if (!timeStr) return -1;
+      const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+      if (!match) return -1;
+      let hours = parseInt(match[1]);
+      const minutes = parseInt(match[2]);
+      const meridiem = match[3] ? match[3].toUpperCase() : null;
+      if (meridiem === 'PM' && hours < 12) hours += 12;
+      if (meridiem === 'AM' && hours === 12) hours = 0;
+      return hours * 60 + minutes;
+    };
+
+    const activeCourse = todayCourses.find(c => {
+      const start = parseTimeToMinutes(c.startTime);
+      const end = parseTimeToMinutes(c.endTime);
+      return currentTimeMinutes >= start && currentTimeMinutes <= end;
+    });
+
+    // ⛔ REJECT: If no course is scheduled right now
+    if (!activeCourse) {
+      return res.status(403).json({
+        success: false,
+        message: `Attendance rejected. No course is scheduled for your class (${student.studentClass}) at this time (${timeParts.hour}:${timeParts.minute} IST).`
+      });
+    }
+
+    // ⛔ REJECT: If the student manually tried to mark a DIFFERENT course name
+    if (activeCourse.title !== course) {
+      return res.status(403).json({
+        success: false,
+        message: `Course Mismatch! The ongoing class is '${activeCourse.title}'. You cannot mark attendance for '${course}'.`
       });
     }
 
@@ -322,7 +381,7 @@ router.post('/mark-attendance', protect, async (req, res) => {
     /////////////////////////////////////////////////////////
 
     const istOffset = 5.5 * 60 * 60 * 1000;
-    const istNow = new Date(new Date().getTime() + istOffset);
+    const istNow = new Date(now.getTime() + istOffset);
     istNow.setUTCHours(0, 0, 0, 0); // Start of day in IST
     const istStartOfTodayAsUtc = new Date(istNow.getTime() - istOffset);
 
@@ -356,7 +415,6 @@ router.post('/mark-attendance', protect, async (req, res) => {
     // MARK ATTENDANCE
     /////////////////////////////////////////////////////////
 
-    const now = new Date();
     const istOptions = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
     const istTimeStr = now.toLocaleTimeString('en-US', istOptions);
 
