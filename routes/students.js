@@ -392,18 +392,22 @@ router.post('/mark-attendance', protect, async (req, res) => {
     });
 
     if (existingAttendance) {
-      return res.status(400).json({
-        message: "Attendance already marked today for this course"
-      });
-    }
+      // Logic for upgrade: If it was marked by system (BLE only) and now we have face verification
+      if (existingAttendance.markedBy === 'system' && !existingAttendance.faceVerified && faceVerified) {
+        existingAttendance.faceVerified = true;
+        existingAttendance.bleVerified = true; // confirm BLE link matches student too
+        existingAttendance.remarks = `Upgraded to Face Verified (${existingAttendance.remarks})`;
+        await existingAttendance.save();
 
-    /////////////////////////////////////////////////////////
-    // 🛡️ REJECT IF BLE NOT VERIFIED
-    /////////////////////////////////////////////////////////
-    if (!bleVerified) {
-      return res.status(403).json({
-        success: false,
-        message: "BLE Device mismatch or not detected. Please Ensure your phone BLE is ON and seen by ESP32."
+        return res.json({
+          success: true,
+          message: "Face scan verified and added to initial BLE ping",
+          attendance: existingAttendance
+        });
+      }
+
+      return res.status(400).json({
+        message: "Attendance already marked today"
       });
     }
 
@@ -430,8 +434,8 @@ router.post('/mark-attendance', protect, async (req, res) => {
       course: course || "Unknown",
       rollNumber: student.rollNumber,
       studentClass: student.studentClass,
-      year: student.year,
-      markedBy: "manual"
+      year: student.year
+
     });
 
     res.json({
