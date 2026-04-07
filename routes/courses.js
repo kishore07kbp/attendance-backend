@@ -10,10 +10,10 @@ const { protect, authorize } = require('../middleware/auth');
 // For Faculty to create a course
 router.post('/', protect, authorize('faculty', 'admin'), async (req, res) => {
   try {
-    const { title, year, studentClass, day, startTime, endTime } = req.body;
+    const { title, year, studentClass, day, periods } = req.body;
 
-    if (!title || !year || !studentClass || !day || !startTime || !endTime) {
-      return res.status(400).json({ message: 'Please provide all course fields' });
+    if (!title || !year || !studentClass || !day || !periods || periods.length === 0) {
+      return res.status(400).json({ message: 'Please provide all course fields, including at least one period' });
     }
 
     const faculty = await Faculty.findOne({ userId: req.user._id });
@@ -24,8 +24,7 @@ router.post('/', protect, authorize('faculty', 'admin'), async (req, res) => {
       year,
       studentClass,
       day,
-      startTime,
-      endTime,
+      periods,
       facultyId: faculty._id,
       facultyName: faculty.name
     });

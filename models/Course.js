@@ -23,11 +23,15 @@ const courseSchema = new mongoose.Schema({
   },
   startTime: {
     type: String,
-    required: [true, 'Start time is required']
+    required: false
   },
   endTime: {
     type: String,
-    required: [true, 'End time is required']
+    required: false
+  },
+  periods: {
+    type: [String],
+    required: [true, 'At least one period is required']
   },
   facultyId: {
     type: mongoose.Schema.Types.ObjectId,
