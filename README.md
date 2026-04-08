@@ -109,12 +109,3 @@ Create a `.env` file in the `backend` directory with the following:
 - `EMAIL_FROM`: Your verified sender email address in Brevo.
 
 ---
-
-## ❌ Error Handling
-Errors follow the standard JSON structure:
-```json
-{
-  "message": "Human readable error",
-  "error": "Technical details (if in dev mode)"
-}
-```
