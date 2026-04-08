@@ -195,6 +195,25 @@ app.use((err, req, res, next) => {
   });
 });
 
+/*
+---------------------------------------
+RENDER KEEP-ALIVE (PREVENT SLEEP)
+---------------------------------------
+*/
+const axios = require("axios");
+
+// Ping the server every 10 minutes to prevent Render from sleeping
+setInterval(async () => {
+  try {
+    // RENDER_EXTERNAL_URL is automatically set by Render
+    const url = process.env.RENDER_EXTERNAL_URL || "https://your-app.onrender.com";
+    const res = await axios.get(url);
+    console.log("Pinged server ✅", res.status);
+  } catch (err) {
+    console.log("Error pinging ❌", err.message);
+  }
+}, 10 * 60 * 1000); // 10 minutes
+
 // ✅ Server start (Render compatible)
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, "0.0.0.0", () => {
